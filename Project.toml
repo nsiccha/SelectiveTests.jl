@@ -1,0 +1,9 @@
+name = "SelectiveTests"
+uuid = "18e2138f-de80-4938-8692-73036667e34d"
+authors = ["nsiccha"]
+version = "0.1.0"
+
+[deps]
+
+[compat]
+julia = "1.6"
