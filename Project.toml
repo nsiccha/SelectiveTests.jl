@@ -4,6 +4,9 @@ authors = ["nsiccha"]
 version = "0.1.0"
 
 [deps]
+TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
+TestItemRunner = "f8b46487-2199-4994-9208-9a1283c18c0a"
 
 [compat]
+TestItemRunner = "1"
 julia = "1.6"
