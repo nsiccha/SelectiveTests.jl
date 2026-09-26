@@ -1,26 +1,36 @@
-using Test, SelectiveTests
+@testsnippet Helpers begin
+    using SelectiveTests
 
-# Build a throwaway git repo from path=>content pairs, committed once.
-function _mkrepo!(files::Dict{String,String})
-    dir = mktempdir()
-    for (p, content) in files
-        fp = joinpath(dir, split(p, '/')...)
-        mkpath(dirname(fp))
-        write(fp, content)
+    # Build a throwaway git repo from path=>content pairs: a root commit plus
+    # one skeleton commit, so HEAD~1 always resolves like a real repo.
+    function _mkrepo!(files::Dict{String,String})
+        dir = mktempdir()
+        for (p, content) in files
+            fp = joinpath(dir, split(p, '/')...)
+            mkpath(dirname(fp))
+            write(fp, content)
+        end
+        run(`git -C $dir -c init.defaultBranch=main init -q`)
+        run(`git -C $dir -c user.email=t@t -c user.name=t commit -q --allow-empty -m root`)
+        run(`git -C $dir add -A`)
+        run(`git -C $dir -c user.email=t@t -c user.name=t commit -qm init`)
+        return dir
     end
-    run(`git -C $dir -c init.defaultBranch=main init -q`)
-    run(`git -C $dir add -A`)
-    run(`git -C $dir -c user.email=t@t -c user.name=t commit -qm init`)
-    return dir
+
+    function _modify!(dir, path, content="# touched\n")
+        open(joinpath(dir, split(path, '/')...), "a") do io
+            print(io, content)
+        end
+    end
+
+    function _commit_change!(dir, path)
+        _modify!(dir, path)
+        run(`git -C $dir add -A`)
+        run(`git -C $dir -c user.email=t@t -c user.name=t commit -qm change`)
+    end
 end
 
-function _modify!(dir, path, content="# touched\n")
-    open(joinpath(dir, split(path, '/')...), "a") do io
-        print(io, content)
-    end
-end
-
-@testitem "detect suite kinds" begin
+@testitem "detect suite kinds" setup=[Helpers] begin
     tir = _mkrepo!(Dict("test/runtests.jl" => "using TestItemRunner\n@run_package_tests()\n",
                         "test/a.jl" => "@testitem \"a\" begin\n@test 1 == 1\nend\n"))
     @test detect_suite(tir) == TestItemSuite
@@ -31,65 +41,73 @@ end
     @test detect_suite(mktempdir()) == UnknownSuite
 end
 
-@testitem "changed test selects itself" begin
+@testitem "changed test selects itself" setup=[Helpers] begin
     dir = _mkrepo!(Dict("test/runtests.jl" => "x\n", "test/a.jl" => "x\n"))
-    _modify!(dir, "test/a.jl")
+    _commit_change!(dir, "test/a.jl")
     sel = select_reference(dir, changed_files(dir))
     @test sel.kind == :subset
     @test sel.files == ["test/a.jl"]
 end
 
-@testitem "src change selects mentioning tests only" begin
+@testitem "src change selects mentioning tests only" setup=[Helpers] begin
     dir = _mkrepo!(Dict("src/foo.jl" => "f() = 1\n",
                         "test/runtests.jl" => "include(\"a.jl\")\ninclude(\"b.jl\")\n",
                         "test/a.jl" => "# uses foo.jl\n",
                         "test/b.jl" => "# unrelated\n"))
-    _modify!(dir, "src/foo.jl")
+    _commit_change!(dir, "src/foo.jl")
     sel = select_reference(dir, changed_files(dir))
     @test sel.kind == :subset
     @test sel.files == ["test/a.jl"]
 end
 
-@testitem "orphan src change selects full" begin
+@testitem "orphan src change selects full" setup=[Helpers] begin
     dir = _mkrepo!(Dict("src/orphan.jl" => "g() = 2\n",
                         "test/runtests.jl" => "x\n",
                         "test/a.jl" => "# unrelated\n"))
-    _modify!(dir, "src/orphan.jl")
+    _commit_change!(dir, "src/orphan.jl")
     sel = select_reference(dir, changed_files(dir))
     @test sel.kind == :full
     @test occursin("orphan", sel.reason)
 end
 
-@testitem "added src file is ignored" begin
+@testitem "added src file is ignored" setup=[Helpers] begin
     dir = _mkrepo!(Dict("test/runtests.jl" => "x\n", "test/a.jl" => "x\n"))
     mkpath(joinpath(dir, "src"))
     write(joinpath(dir, "src", "new.jl"), "h() = 3\n")
-    sel = select_reference(dir, changed_files(dir))
+    sel = select_reference(dir, changed_files(dir; base="HEAD", head="HEAD"))
     @test sel.kind == :none
 end
 
-@testitem "environment change selects full" begin
+@testitem "uncommitted change selects itself" setup=[Helpers] begin
+    dir = _mkrepo!(Dict("test/runtests.jl" => "x\n", "test/a.jl" => "x\n"))
+    _modify!(dir, "test/a.jl")
+    sel = select_reference(dir, changed_files(dir; base="HEAD", head="HEAD"))
+    @test sel.kind == :subset
+    @test sel.files == ["test/a.jl"]
+end
+
+@testitem "environment change selects full" setup=[Helpers] begin
     dir = _mkrepo!(Dict("Project.toml" => "name=\"P\"\n",
                         "test/runtests.jl" => "x\n", "test/a.jl" => "x\n"))
-    _modify!(dir, "Project.toml")
+    _commit_change!(dir, "Project.toml")
     sel = select_reference(dir, changed_files(dir))
     @test sel.kind == :full
 end
 
-@testitem "docs change selects none" begin
+@testitem "docs change selects none" setup=[Helpers] begin
     dir = _mkrepo!(Dict("README.md" => "hi\n",
                         "test/runtests.jl" => "x\n", "test/a.jl" => "x\n"))
-    _modify!(dir, "README.md")
+    _commit_change!(dir, "README.md")
     sel = select_reference(dir, changed_files(dir))
     # README basename is unreferenced: the contract is ignore-with-note.
     @test sel.kind == :none
 end
 
-@testitem "skills change selects skill readers" begin
+@testitem "skills change selects skill readers" setup=[Helpers] begin
     dir = _mkrepo!(Dict("skills/widgets/SKILL.md" => "how\n",
                         "test/fixture_w.jl" => "read(joinpath(ROOT, \"skills\", \"widgets\", \"SKILL.md\"))\n",
                         "test/fixture_q.jl" => "# unrelated\n"))
-    _modify!(dir, "skills/widgets/SKILL.md")
+    _commit_change!(dir, "skills/widgets/SKILL.md")
     sel = select_reference(dir, changed_files(dir))
     @test sel.kind == :subset
     @test sel.files == ["test/fixture_w.jl"]
