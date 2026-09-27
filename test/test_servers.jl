@@ -91,3 +91,25 @@ end
     end
     @test isempty(out)
 end
+
+@testitem "server child inherits caller env" setup=[ServerHelpers] begin
+    port = _free_port()
+    val = "envprobe-$(getpid())"
+    code = "using Sockets; println(ENV[\"SELECTIVETESTS_ENV_PROBE\"]); flush(stdout); " *
+           "s = listen(IPv4(127,0,0,1), $port); while true; accept(s); end"
+    cmd = `$(_sjl()) --startup-file=no -e $code`
+    out = IOBuffer()
+    got = Ref("")
+    withenv("SELECTIVETESTS_ENV_PROBE" => val) do
+        with_server_subprocess(cmd; ready=() -> _tcp_up(port), timeout=60,
+                               out=out, err=devnull) do
+            t0 = time()
+            while time() - t0 < 10
+                got[] *= String(take!(out))
+                occursin(val, got[]) && break
+                sleep(0.1)
+            end
+        end
+    end
+    @test occursin(val, got[])
+end
