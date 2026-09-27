@@ -341,10 +341,11 @@ function load_map(path::AbstractString)::CoverageMap
                        Vector{String}(get(meta, "failures", String[])))
 end
 
-# Subprocess children inherit the caller's environment, which under Pkg.test
-# can carry a JULIA_LOAD_PATH that hides even stdlibs (observed: `using Pkg`
-# failing with "not found in current path"). Pin a self-contained load path:
-# the active project plus the stdlib dir.
+# setenv REPLACES the child environment (no implicit inherit), and a bare
+# JULIA_LOAD_PATH inherited under Pkg.test can hide even stdlibs (observed:
+# `using Pkg` failing with "not found in current path"). Pin a self-contained
+# load path: the active project plus the stdlib dir. Callers that need more of
+# the caller env must merge ENV themselves (with_server_subprocess does).
 function _child_env()::Vector{Pair{String,String}}
     sep = Sys.iswindows() ? ";" : ":"
     return ["JULIA_LOAD_PATH" => "@" * sep * "@stdlib"]

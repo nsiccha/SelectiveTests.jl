@@ -20,7 +20,14 @@ function with_server_subprocess(f::Function, cmd::Cmd;
         dir::AbstractString=pwd(),
         env::Vector{Pair{String,String}}=Pair{String,String}[],
         out::IO=stderr, err::IO=stderr)
-    envdict = Dict{String,String}(k => v for (k, v) in _child_env())
+    # setenv REPLACES the child environment (no implicit inherit), so merge the
+    # caller env explicitly: a server needs the caller's vars (the KB fixture
+    # server refuses to boot without KB_AGENTS_STATE_DIR). The load-path pin
+    # and `env` win over inherited values.
+    envdict = Dict{String,String}(k => v for (k, v) in ENV)
+    for (k, v) in _child_env()
+        envdict[k] = v
+    end
     for (k, v) in env
         envdict[k] = v
     end
