@@ -8,6 +8,9 @@ export detect_suite, changed_files, select_reference
 export CoverageMap, cov_has_hits, collect_src_hits
 export build_map, load_map, save_map, select_coverage, select_affected
 export run_selected, run_selection_subprocess
+export with_server_subprocess
+
+include("servers.jl")
 
 """
 Suite layout kinds the selector understands.
